@@ -26,6 +26,10 @@
             <span>PNG preferred. JPEG and WebP work too.</span>
           </label>
           <p class="file-name" id="fileName">No file selected</p>
+          <div class="actions compact">
+            <button type="button" id="cropBtn" disabled>Crop image</button>
+            <button type="button" id="resetCropBtn" disabled>Reset crop</button>
+          </div>
         </section>
 
         <section class="panel controls">
@@ -114,6 +118,10 @@
               Copies
               <input id="copies" type="number" min="1" max="99" value="1" />
             </label>
+            <p class="hint">
+              Batches print one sticker at a time with a pause. If the printer dies on the 3rd label,
+              use the original 20V brick in a wall outlet, darkness 12–15, and 3 ips.
+            </p>
           </fieldset>
 
           <div class="actions">
@@ -140,6 +148,19 @@
           </div>
           <p class="meta" id="meta">Import an image to see the 203 DPI bitmap.</p>
           <p class="fit-badge" id="fitBadge">Waiting for a one-label preview</p>
+          <section class="crop-box hidden" id="cropBox">
+            <div class="preview-head">
+              <h2>Crop</h2>
+              <label class="check">
+                <input id="lockAspect" type="checkbox" checked />
+                Lock to label shape
+              </label>
+            </div>
+            <div class="crop-stage">
+              <canvas id="cropCanvas" width="640" height="480"></canvas>
+            </div>
+            <p class="hint">Drag inside the box to move it. Drag a corner or edge to resize. Only this area is printed.</p>
+          </section>
           <div class="preview-grid">
             <figure>
               <figcaption>Resized grayscale</figcaption>

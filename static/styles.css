@@ -357,6 +357,29 @@ figcaption {
   margin: 0;
 }
 
+.crop-box {
+  margin: 0 0 16px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #16130f;
+}
+
+.crop-stage {
+  margin-top: 10px;
+  background: #0c0a08;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+#cropCanvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  cursor: crosshair;
+  touch-action: none;
+}
+
 @media (max-width: 960px) {
   .layout,
   .preview-grid {

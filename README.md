@@ -9,7 +9,7 @@ Two ways to run it:
 - **Web version** — local FastAPI server in your browser
 - **Standalone Windows app** — double-click an `.exe` (download a release or build it)
 
-Default label size is **4" × 4"** (812 × 812 dots). Other sizes stay in the UI.
+Default label size is **4" × 4"** (812 × 812 dots). Other sizes stay in the UI. After you drop an image, crop it to the part you want on the sticker. Lock to label shape keeps a 4×4 square (or whatever size you picked).
 
 ## What you need
 

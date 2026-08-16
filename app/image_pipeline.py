@@ -19,6 +19,7 @@ class ProcessSettings:
     contrast: float = 1.2
     threshold: int = 128
     sharpen: bool = True
+    crop: tuple[float, float, float, float] = (0.0, 0.0, 1.0, 1.0)
 
 
 def load_image(data: bytes) -> Image.Image:
@@ -27,8 +28,44 @@ def load_image(data: bytes) -> Image.Image:
     return _flatten_to_rgb(image)
 
 
+def normalize_crop(crop: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
+    left, top, right, bottom = crop
+    left = max(0.0, min(1.0, float(left)))
+    top = max(0.0, min(1.0, float(top)))
+    right = max(0.0, min(1.0, float(right)))
+    bottom = max(0.0, min(1.0, float(bottom)))
+    if right < left:
+        left, right = right, left
+    if bottom < top:
+        top, bottom = bottom, top
+    if right - left < 0.02:
+        right = min(1.0, left + 0.02)
+        left = max(0.0, right - 0.02)
+    if bottom - top < 0.02:
+        bottom = min(1.0, top + 0.02)
+        top = max(0.0, bottom - 0.02)
+    return left, top, right, bottom
+
+
+def apply_crop(image: Image.Image, crop: tuple[float, float, float, float]) -> Image.Image:
+    left, top, right, bottom = normalize_crop(crop)
+    if (left, top, right, bottom) == (0.0, 0.0, 1.0, 1.0):
+        return image
+    width, height = image.size
+    box = (
+        int(round(left * width)),
+        int(round(top * height)),
+        int(round(right * width)),
+        int(round(bottom * height)),
+    )
+    if box[2] - box[0] < 2 or box[3] - box[1] < 2:
+        return image
+    return image.crop(box)
+
+
 def process_image(source: Image.Image, settings: ProcessSettings) -> tuple[Image.Image, Image.Image]:
     """Return (resized grayscale, 1-bit print image)."""
+    source = apply_crop(source, settings.crop)
     gray = ImageOps.grayscale(source)
     gray = _apply_contrast(gray, settings.contrast)
     if settings.sharpen:

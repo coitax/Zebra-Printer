@@ -2,6 +2,9 @@ const state = {
   file: null,
   zoom: 1,
   previewTimer: null,
+  sourceImage: null,
+  crop: { left: 0, top: 0, right: 1, bottom: 1 },
+  drag: null,
 };
 
 const els = {
@@ -38,6 +41,11 @@ const els = {
   meta: document.getElementById("meta"),
   originalPreview: document.getElementById("originalPreview"),
   printPreview: document.getElementById("printPreview"),
+  cropBtn: document.getElementById("cropBtn"),
+  resetCropBtn: document.getElementById("resetCropBtn"),
+  cropBox: document.getElementById("cropBox"),
+  cropCanvas: document.getElementById("cropCanvas"),
+  lockAspect: document.getElementById("lockAspect"),
 };
 
 init();
@@ -102,6 +110,18 @@ function bindControls() {
   els.probeBtn.addEventListener("click", () => probePrinter());
   els.refreshPrintersBtn.addEventListener("click", () => loadPrinters({ probe: true }));
   els.printer.addEventListener("change", () => probePrinter());
+  els.cropBtn.addEventListener("click", () => showCropper());
+  els.resetCropBtn.addEventListener("click", () => resetCrop());
+  els.lockAspect.addEventListener("change", () => {
+    if (els.lockAspect.checked) applyAspectToCrop();
+    drawCropper();
+    queuePreview();
+  });
+  els.preset.addEventListener("change", () => {
+    if (els.lockAspect.checked && state.sourceImage) applyAspectToCrop();
+    drawCropper();
+  });
+  bindCropper();
 }
 
 async function loadPresets() {
@@ -110,6 +130,8 @@ async function loadPresets() {
   for (const preset of data.presets) {
     const option = document.createElement("option");
     option.value = preset.id;
+    option.dataset.widthIn = String(preset.width_in);
+    option.dataset.heightIn = String(preset.height_in);
     option.textContent = `${preset.label} · ${Math.round(preset.width_in * 203)}×${Math.round(preset.height_in * 203)} dots`;
     if (preset.id === "4x4") option.selected = true;
     els.preset.appendChild(option);
@@ -195,7 +217,9 @@ function setFile(file) {
   els.fileName.textContent = file.name;
   els.printBtn.disabled = false;
   els.zplBtn.disabled = false;
-  queuePreview();
+  els.cropBtn.disabled = false;
+  els.resetCropBtn.disabled = false;
+  loadSourceImage(file);
 }
 
 function onSettingsChange() {
@@ -259,12 +283,21 @@ async function submitJob(url, successText) {
     setStatus("Choose a printer first.", "err");
     return;
   }
-  setStatus("Sending raw ZPL…");
+  const copies = Math.max(1, Number(els.copies.value) || 1);
+  setStatus(copies > 1 ? `Printing ${copies} stickers with a cooldown…` : "Sending raw ZPL…");
+  els.printBtn.disabled = true;
   try {
     await postForm(url);
-    setStatus(successText, "ok");
+    setStatus(
+      copies > 1
+        ? `Printed ${copies} stickers with a pause between each.`
+        : successText,
+      "ok"
+    );
   } catch (error) {
     setStatus(error.message, "err");
+  } finally {
+    els.printBtn.disabled = !state.file;
   }
 }
 
@@ -343,6 +376,10 @@ function appendShared(body) {
   body.append("darkness", els.darkness.value);
   body.append("speed", els.speed.value);
   body.append("copies", els.copies.value);
+  body.append(
+    "crop",
+    `${state.crop.left},${state.crop.top},${state.crop.right},${state.crop.bottom}`
+  );
 }
 
 async function postForm(url) {
@@ -369,4 +406,285 @@ async function errorMessage(response) {
 function setStatus(message, kind) {
   els.status.textContent = message;
   els.status.className = `status${kind ? ` ${kind}` : ""}`;
+}
+
+function loadSourceImage(file) {
+  const url = URL.createObjectURL(file);
+  const image = new Image();
+  image.onload = () => {
+    URL.revokeObjectURL(url);
+    state.sourceImage = image;
+    resetCrop({ preview: true });
+    showCropper();
+  };
+  image.onerror = () => {
+    URL.revokeObjectURL(url);
+    setStatus("Could not read that image for cropping.", "err");
+  };
+  image.src = url;
+}
+
+function showCropper() {
+  if (!state.sourceImage) return;
+  els.cropBox.classList.remove("hidden");
+  sizeCropCanvas();
+  drawCropper();
+}
+
+function resetCrop({ preview = true } = {}) {
+  if (els.lockAspect.checked && state.sourceImage) {
+    applyAspectToCrop();
+  } else {
+    state.crop = { left: 0, top: 0, right: 1, bottom: 1 };
+  }
+  drawCropper();
+  if (preview) queuePreview();
+}
+
+function labelAspect() {
+  const width = Number(els.preset.value === "custom" ? els.widthIn.value : currentPresetInches().width);
+  const height = Number(els.preset.value === "custom" ? els.heightIn.value : currentPresetInches().height);
+  if (!width || !height) return 1;
+  return width / height;
+}
+
+function currentPresetInches() {
+  const option = els.preset.selectedOptions[0];
+  if (!option || els.preset.value === "custom") {
+    return { width: Number(els.widthIn.value) || 4, height: Number(els.heightIn.value) || 4 };
+  }
+  return {
+    width: Number(option.dataset.widthIn) || 4,
+    height: Number(option.dataset.heightIn) || 4,
+  };
+}
+
+function applyAspectToCrop() {
+  if (!state.sourceImage) return;
+  const aspect = labelAspect();
+  const imageAspect = state.sourceImage.width / state.sourceImage.height;
+  let width = 1;
+  let height = 1;
+  if (imageAspect > aspect) {
+    width = aspect / imageAspect;
+    height = 1;
+  } else {
+    width = 1;
+    height = imageAspect / aspect;
+  }
+  const left = (1 - width) / 2;
+  const top = (1 - height) / 2;
+  state.crop = { left, top, right: left + width, bottom: top + height };
+}
+
+function sizeCropCanvas() {
+  const canvas = els.cropCanvas;
+  const maxWidth = canvas.parentElement.clientWidth || 640;
+  const image = state.sourceImage;
+  if (!image) return;
+  const height = Math.round(maxWidth * (image.height / image.width));
+  canvas.width = Math.round(maxWidth);
+  canvas.height = Math.max(180, Math.min(520, height));
+}
+
+function cropLayout() {
+  const canvas = els.cropCanvas;
+  const image = state.sourceImage;
+  const scale = Math.min(canvas.width / image.width, canvas.height / image.height);
+  const drawW = image.width * scale;
+  const drawH = image.height * scale;
+  const offsetX = (canvas.width - drawW) / 2;
+  const offsetY = (canvas.height - drawH) / 2;
+  return { scale, drawW, drawH, offsetX, offsetY };
+}
+
+function cropRect() {
+  const { scale, offsetX, offsetY } = cropLayout();
+  const image = state.sourceImage;
+  return {
+    x: offsetX + state.crop.left * image.width * scale,
+    y: offsetY + state.crop.top * image.height * scale,
+    w: (state.crop.right - state.crop.left) * image.width * scale,
+    h: (state.crop.bottom - state.crop.top) * image.height * scale,
+  };
+}
+
+function drawCropper() {
+  const canvas = els.cropCanvas;
+  const image = state.sourceImage;
+  if (!canvas || !image) return;
+  const ctx = canvas.getContext("2d");
+  const { offsetX, offsetY, drawW, drawH } = cropLayout();
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "#0c0a08";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(image, offsetX, offsetY, drawW, drawH);
+  const rect = cropRect();
+  ctx.fillStyle = "rgba(12, 10, 8, 0.55)";
+  ctx.fillRect(offsetX, offsetY, drawW, drawH);
+  ctx.clearRect(rect.x, rect.y, rect.w, rect.h);
+  ctx.drawImage(
+    image,
+    state.crop.left * image.width,
+    state.crop.top * image.height,
+    (state.crop.right - state.crop.left) * image.width,
+    (state.crop.bottom - state.crop.top) * image.height,
+    rect.x,
+    rect.y,
+    rect.w,
+    rect.h
+  );
+  ctx.strokeStyle = "#e3a008";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(rect.x + 1, rect.y + 1, rect.w - 2, rect.h - 2);
+  ctx.fillStyle = "#e3a008";
+  for (const handle of handlePoints(rect)) {
+    ctx.fillRect(handle.x - 5, handle.y - 5, 10, 10);
+  }
+}
+
+function handlePoints(rect) {
+  return [
+    { id: "nw", x: rect.x, y: rect.y },
+    { id: "n", x: rect.x + rect.w / 2, y: rect.y },
+    { id: "ne", x: rect.x + rect.w, y: rect.y },
+    { id: "e", x: rect.x + rect.w, y: rect.y + rect.h / 2 },
+    { id: "se", x: rect.x + rect.w, y: rect.y + rect.h },
+    { id: "s", x: rect.x + rect.w / 2, y: rect.y + rect.h },
+    { id: "sw", x: rect.x, y: rect.y + rect.h },
+    { id: "w", x: rect.x, y: rect.y + rect.h / 2 },
+  ];
+}
+
+function bindCropper() {
+  const canvas = els.cropCanvas;
+  canvas.addEventListener("pointerdown", onCropPointerDown);
+  window.addEventListener("pointermove", onCropPointerMove);
+  window.addEventListener("pointerup", onCropPointerUp);
+  window.addEventListener("resize", () => {
+    if (!state.sourceImage || els.cropBox.classList.contains("hidden")) return;
+    sizeCropCanvas();
+    drawCropper();
+  });
+}
+
+function canvasPoint(event) {
+  const bounds = els.cropCanvas.getBoundingClientRect();
+  const scaleX = els.cropCanvas.width / bounds.width;
+  const scaleY = els.cropCanvas.height / bounds.height;
+  return {
+    x: (event.clientX - bounds.left) * scaleX,
+    y: (event.clientY - bounds.top) * scaleY,
+  };
+}
+
+function hitHandle(point) {
+  const rect = cropRect();
+  for (const handle of handlePoints(rect)) {
+    if (Math.abs(point.x - handle.x) <= 12 && Math.abs(point.y - handle.y) <= 12) {
+      return handle.id;
+    }
+  }
+  if (
+    point.x >= rect.x &&
+    point.x <= rect.x + rect.w &&
+    point.y >= rect.y &&
+    point.y <= rect.y + rect.h
+  ) {
+    return "move";
+  }
+  return null;
+}
+
+function onCropPointerDown(event) {
+  if (!state.sourceImage) return;
+  const point = canvasPoint(event);
+  const handle = hitHandle(point);
+  if (!handle) return;
+  event.preventDefault();
+  els.cropCanvas.setPointerCapture(event.pointerId);
+  state.drag = { handle, start: point, crop: { ...state.crop } };
+}
+
+function onCropPointerMove(event) {
+  if (!state.drag || !state.sourceImage) return;
+  const point = canvasPoint(event);
+  const { scale } = cropLayout();
+  const dx = (point.x - state.drag.start.x) / (state.sourceImage.width * scale);
+  const dy = (point.y - state.drag.start.y) / (state.sourceImage.height * scale);
+  applyCropDrag(state.drag.handle, state.drag.crop, dx, dy);
+  drawCropper();
+}
+
+function onCropPointerUp() {
+  if (!state.drag) return;
+  state.drag = null;
+  queuePreview();
+}
+
+function applyCropDrag(handle, start, dx, dy) {
+  let { left, top, right, bottom } = start;
+  const aspect = labelAspect();
+  const imageAspect = state.sourceImage.width / state.sourceImage.height;
+  const lock = els.lockAspect.checked;
+
+  if (handle === "move") {
+    const width = right - left;
+    const height = bottom - top;
+    left = clamp(left + dx, 0, 1 - width);
+    top = clamp(top + dy, 0, 1 - height);
+    state.crop = { left, top, right: left + width, bottom: top + height };
+    return;
+  }
+
+  if (handle.includes("w")) left = clamp(left + dx, 0, right - 0.04);
+  if (handle.includes("e")) right = clamp(right + dx, left + 0.04, 1);
+  if (handle.includes("n")) top = clamp(top + dy, 0, bottom - 0.04);
+  if (handle.includes("s")) bottom = clamp(bottom + dy, top + 0.04, 1);
+
+  if (lock) {
+    const target = aspect / imageAspect;
+    const width = right - left;
+    const height = bottom - top;
+    let nextW = width;
+    let nextH = height;
+    if (handle === "n" || handle === "s") {
+      nextW = height * target;
+    } else if (handle === "e" || handle === "w") {
+      nextH = width / target;
+    } else {
+      nextH = width / target;
+    }
+    if (handle.includes("e")) right = left + nextW;
+    if (handle.includes("w")) left = right - nextW;
+    if (handle.includes("s")) bottom = top + nextH;
+    if (handle.includes("n")) top = bottom - nextH;
+    if (left < 0) {
+      right -= left;
+      left = 0;
+    }
+    if (top < 0) {
+      bottom -= top;
+      top = 0;
+    }
+    if (right > 1) {
+      left -= right - 1;
+      right = 1;
+    }
+    if (bottom > 1) {
+      top -= bottom - 1;
+      bottom = 1;
+    }
+  }
+
+  state.crop = {
+    left: clamp(left, 0, 1),
+    top: clamp(top, 0, 1),
+    right: clamp(right, 0, 1),
+    bottom: clamp(bottom, 0, 1),
+  };
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
 }

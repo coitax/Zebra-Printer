@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import time
 from typing import Annotated
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -8,11 +9,11 @@ from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.calibration import build_calibration_image
-from app.image_pipeline import ProcessSettings, image_to_png_bytes, load_image, process_image
+from app.image_pipeline import ProcessSettings, image_to_png_bytes, load_image, normalize_crop, process_image
 from app.presets import PRESETS, resolve_size
-from app.printer import list_printers, probe_printer, recommended_printer_name, send_raw
+from app.printer import inspect_printer, list_printers, probe_printer, recommended_printer_name, send_raw, wait_until_idle
 from app.paths import resource_root
-from app.zpl import image_to_zpl, media_calibrate_zpl
+from app.zpl import graphic_batch_jobs, image_to_zpl, media_calibrate_zpl
 
 ROOT = resource_root()
 STATIC = ROOT / "static"
@@ -80,9 +81,10 @@ async def preview(
     contrast: Annotated[float, Form()] = 1.2,
     threshold: Annotated[int, Form()] = 128,
     sharpen: Annotated[str, Form()] = "true",
+    crop: Annotated[str, Form()] = "0,0,1,1",
 ) -> dict:
     settings, inches = _settings_from_form(
-        preset, width_in, height_in, fit, dither, contrast, threshold, sharpen
+        preset, width_in, height_in, fit, dither, contrast, threshold, sharpen, crop
     )
     source = await _read_image(file)
     gray, print_image = process_image(source, settings)
@@ -108,9 +110,10 @@ async def download_zpl(
     darkness: Annotated[int, Form()] = 18,
     speed: Annotated[int, Form()] = 2,
     copies: Annotated[int, Form()] = 1,
+    crop: Annotated[str, Form()] = "0,0,1,1",
 ) -> PlainTextResponse:
     settings, _ = _settings_from_form(
-        preset, width_in, height_in, fit, dither, contrast, threshold, sharpen
+        preset, width_in, height_in, fit, dither, contrast, threshold, sharpen, crop
     )
     source = await _read_image(file)
     _, print_image = process_image(source, settings)
@@ -144,26 +147,28 @@ async def print_sticker(
     darkness: Annotated[int, Form()] = 18,
     speed: Annotated[int, Form()] = 2,
     copies: Annotated[int, Form()] = 1,
+    crop: Annotated[str, Form()] = "0,0,1,1",
 ) -> dict:
     settings, inches = _settings_from_form(
-        preset, width_in, height_in, fit, dither, contrast, threshold, sharpen
+        preset, width_in, height_in, fit, dither, contrast, threshold, sharpen, crop
     )
     source = await _read_image(file)
     _, print_image = process_image(source, settings)
-    zpl = image_to_zpl(
+    copies = max(1, min(99, int(copies)))
+    _print_paced(
+        printer_name,
         print_image,
+        copies=copies,
         darkness=darkness,
         speed=speed,
-        copies=copies,
         label_width=settings.width_dots,
         label_height=settings.height_dots,
     )
-    _send(printer_name, zpl, "GK420D Sticker")
     return {
         "ok": True,
         **inches,
         **_fit_check(print_image, settings),
-        "copies": max(1, min(99, copies)),
+        "copies": copies,
     }
 
 
@@ -231,6 +236,7 @@ def _settings_from_form(
     contrast: float,
     threshold: int,
     sharpen: str,
+    crop: str = "0,0,1,1",
 ) -> tuple[ProcessSettings, dict]:
     if fit not in {"contain", "cover", "stretch"}:
         raise HTTPException(status_code=400, detail="fit must be contain, cover, or stretch")
@@ -248,6 +254,7 @@ def _settings_from_form(
         contrast=contrast,
         threshold=threshold,
         sharpen=_as_bool(sharpen),
+        crop=_parse_crop(crop),
     )
     return settings, {
         "preset": preset_id,
@@ -281,10 +288,80 @@ def _png_b64(image) -> str:
     return base64.b64encode(image_to_png_bytes(image)).decode("ascii")
 
 
+def _parse_crop(value: str) -> tuple[float, float, float, float]:
+    try:
+        parts = [float(part.strip()) for part in value.split(",")]
+        if len(parts) != 4:
+            raise ValueError("crop needs four numbers")
+        return normalize_crop((parts[0], parts[1], parts[2], parts[3]))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="crop must be left,top,right,bottom") from exc
+
+
 def _as_bool(value: str | bool) -> bool:
     if isinstance(value, bool):
         return value
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _print_paced(
+    printer_name: str,
+    print_image,
+    *,
+    copies: int,
+    darkness: int,
+    speed: int,
+    label_width: int,
+    label_height: int,
+    cooldown: float = 2.5,
+) -> None:
+    """Print one label at a time so the G-series PSU can recover between burns."""
+    if copies == 1:
+        zpl = image_to_zpl(
+            print_image,
+            darkness=darkness,
+            speed=speed,
+            label_width=label_width,
+            label_height=label_height,
+        )
+        _send(printer_name, zpl, "GK420D Sticker")
+        return
+
+    download, print_one, cleanup = graphic_batch_jobs(
+        print_image,
+        darkness=darkness,
+        speed=speed,
+        label_width=label_width,
+        label_height=label_height,
+    )
+    _send(printer_name, download, "GK420D Graphic")
+    wait_until_idle(printer_name.strip())
+    try:
+        for index in range(copies):
+            _assert_printer_awake(printer_name)
+            _send(printer_name, print_one, f"GK420D Sticker {index + 1}")
+            wait_until_idle(printer_name.strip())
+            if index + 1 < copies:
+                time.sleep(cooldown)
+    finally:
+        try:
+            _send(printer_name, cleanup, "GK420D Cleanup")
+        except Exception:
+            pass
+
+
+def _assert_printer_awake(printer_name: str) -> None:
+    info = inspect_printer(printer_name.strip())
+    if info.online:
+        return
+    raise HTTPException(
+        status_code=502,
+        detail=(
+            "Printer went offline mid-batch. That is usually the power supply folding "
+            "under a full 4×4 burn. Plug the original 20V brick straight into the wall, "
+            "drop darkness to 12–15, use 3 ips for batches, and let the printer cool."
+        ),
+    )
 
 
 def _send(printer_name: str, zpl: str, job_name: str) -> None:
