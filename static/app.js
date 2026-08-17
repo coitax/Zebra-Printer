@@ -1,6 +1,6 @@
 const state = {
   file: null,
-  zoom: 1,
+  zoom: "fit",
   previewTimer: null,
   sourceImage: null,
   crop: { left: 0, top: 0, right: 1, bottom: 1 },
@@ -95,7 +95,7 @@ function bindControls() {
 
   document.querySelectorAll("[data-zoom]").forEach((button) => {
     button.addEventListener("click", () => {
-      state.zoom = Number(button.dataset.zoom);
+      state.zoom = button.dataset.zoom === "fit" ? "fit" : Number(button.dataset.zoom);
       document.querySelectorAll("[data-zoom]").forEach((item) => {
         item.classList.toggle("active", item === button);
       });
@@ -263,15 +263,26 @@ async function runPreview() {
 }
 
 function showPreview(img, b64) {
+  img.onload = () => applyZoom();
   img.src = `data:image/png;base64,${b64}`;
   img.hidden = false;
   const placeholder = img.parentElement.querySelector(".placeholder");
   if (placeholder) placeholder.hidden = true;
+  applyZoom();
 }
 
 function applyZoom() {
   [els.originalPreview, els.printPreview].forEach((img) => {
     if (!img.naturalWidth) return;
+    if (state.zoom === "fit") {
+      img.classList.add("fit");
+      img.classList.remove("dots");
+      img.style.width = "";
+      img.style.height = "";
+      return;
+    }
+    img.classList.remove("fit");
+    img.classList.add("dots");
     img.style.width = `${img.naturalWidth * state.zoom}px`;
     img.style.height = `${img.naturalHeight * state.zoom}px`;
   });
@@ -479,12 +490,10 @@ function applyAspectToCrop() {
 
 function sizeCropCanvas() {
   const canvas = els.cropCanvas;
-  const maxWidth = canvas.parentElement.clientWidth || 640;
   const image = state.sourceImage;
   if (!image) return;
-  const height = Math.round(maxWidth * (image.height / image.width));
-  canvas.width = Math.round(maxWidth);
-  canvas.height = Math.max(180, Math.min(520, height));
+  canvas.width = 320;
+  canvas.height = 220;
 }
 
 function cropLayout() {
