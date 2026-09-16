@@ -36,9 +36,16 @@ def index() -> FileResponse:
     return FileResponse(STATIC / "index.html")
 
 
+APP_BUILD = "4x6-adaptive-crop"
+
+
 @app.get("/api/presets")
 def presets() -> dict:
-    return {"presets": list(PRESETS.values()), "default": DEFAULT_PRESET}
+    return {
+        "presets": list(PRESETS.values()),
+        "default": DEFAULT_PRESET,
+        "build": APP_BUILD,
+    }
 
 
 @app.get("/api/printers")

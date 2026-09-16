@@ -52,6 +52,7 @@ const els = {
   cropCanvas: document.getElementById("cropCanvas"),
   lockAspect: document.getElementById("lockAspect"),
   pageRow: document.getElementById("pageRow"),
+  appBuild: document.getElementById("appBuild"),
   pdfPage: document.getElementById("pdfPage"),
   pdfPageCount: document.getElementById("pdfPageCount"),
 };
@@ -141,6 +142,7 @@ function bindControls() {
 async function loadPresets() {
   const data = await fetchJson("/api/presets");
   const defaultPreset = data.default || "4x6";
+  if (els.appBuild && data.build) els.appBuild.textContent = data.build;
   els.preset.innerHTML = "";
   for (const preset of data.presets) {
     const option = document.createElement("option");
