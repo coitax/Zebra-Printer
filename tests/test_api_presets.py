@@ -1,0 +1,16 @@
+from fastapi.testclient import TestClient
+
+from app.main import APP_BUILD, app
+from app.presets import DEFAULT_PRESET
+
+
+client = TestClient(app)
+
+
+def test_presets_endpoint_exposes_default():
+    response = client.get("/api/presets")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["default"] == DEFAULT_PRESET
+    assert data["build"] == APP_BUILD
+    assert any(preset["id"] == "4x6" for preset in data["presets"])

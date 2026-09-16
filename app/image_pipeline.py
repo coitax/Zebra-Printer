@@ -121,6 +121,22 @@ def detect_content_crop(image: Image.Image) -> tuple[float, float, float, float]
     return crop
 
 
+def _shipping_target_aspect(
+    crop: tuple[float, float, float, float],
+    size: tuple[int, int],
+) -> float:
+    """Pick portrait 4:6 or landscape 6:4 based on detected ink box orientation."""
+    left, top, right, bottom = normalize_crop(crop)
+    img_w, img_h = size
+    box_w = max(2.0, (right - left) * img_w)
+    box_h = max(2.0, (bottom - top) * img_h)
+    aspect = box_w / box_h if box_h else SHIPPING_ASPECT
+    landscape = 1.0 / SHIPPING_ASPECT
+    if abs(aspect - landscape) < abs(aspect - SHIPPING_ASPECT):
+        return landscape
+    return SHIPPING_ASPECT
+
+
 def expand_crop_to_aspect(
     crop: tuple[float, float, float, float],
     size: tuple[int, int],
@@ -191,7 +207,7 @@ def label_crop_for_image(image: Image.Image, filename: str = "") -> dict:
     crop = detect_content_crop(image)
     suggested = suggest_label_preset(image, crop, filename)
     if suggested == SHIPPING_PRESET:
-        crop = expand_crop_to_aspect(crop, image.size, SHIPPING_ASPECT)
+        crop = expand_crop_to_aspect(crop, image.size, _shipping_target_aspect(crop, image.size))
     return {
         "crop": crop,
         "suggested_preset": suggested,
@@ -215,9 +231,19 @@ def apply_crop(image: Image.Image, crop: tuple[float, float, float, float]) -> I
     return image.crop(box)
 
 
+def _maybe_rotate_for_label(source: Image.Image, settings: ProcessSettings) -> Image.Image:
+    """Rotate landscape label content 90° when the target stock is portrait."""
+    if settings.width_dots >= settings.height_dots:
+        return source
+    if source.width <= source.height:
+        return source
+    return source.rotate(90, expand=True, resample=Image.Resampling.BICUBIC)
+
+
 def process_image(source: Image.Image, settings: ProcessSettings) -> tuple[Image.Image, Image.Image]:
     """Return (resized grayscale, 1-bit print image)."""
     source = apply_crop(source, settings.crop)
+    source = _maybe_rotate_for_label(source, settings)
     gray = ImageOps.grayscale(source)
     gray = _apply_contrast(gray, settings.contrast)
     if settings.sharpen:
