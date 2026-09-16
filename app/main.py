@@ -19,7 +19,7 @@ from app.image_pipeline import (
     pdf_page_count,
     process_image,
 )
-from app.presets import PRESETS, resolve_size
+from app.presets import DEFAULT_PRESET, PRESETS, resolve_size
 from app.printer import inspect_printer, list_printers, probe_printer, recommended_printer_name, send_raw, wait_until_idle
 from app.paths import resource_root
 from app.zpl import graphic_batch_jobs, image_to_zpl, media_calibrate_zpl
@@ -38,7 +38,7 @@ def index() -> FileResponse:
 
 @app.get("/api/presets")
 def presets() -> dict:
-    return {"presets": list(PRESETS.values())}
+    return {"presets": list(PRESETS.values()), "default": DEFAULT_PRESET}
 
 
 @app.get("/api/printers")
@@ -110,7 +110,7 @@ async def source_preview(
 @app.post("/api/preview")
 async def preview(
     file: Annotated[UploadFile, File()],
-    preset: Annotated[str, Form()] = "4x6",
+    preset: Annotated[str, Form()] = DEFAULT_PRESET,
     width_in: Annotated[float | None, Form()] = None,
     height_in: Annotated[float | None, Form()] = None,
     fit: Annotated[str, Form()] = "cover",
@@ -128,7 +128,7 @@ async def preview(
     gray, print_image = process_image(source, settings)
     return {
         **inches,
-        **_fit_check(print_image, settings),
+        **_fit_check(gray, settings),
         "original_png": _png_b64(gray),
         "print_png": _png_b64(print_image),
     }
@@ -137,7 +137,7 @@ async def preview(
 @app.post("/api/zpl")
 async def download_zpl(
     file: Annotated[UploadFile, File()],
-    preset: Annotated[str, Form()] = "4x6",
+    preset: Annotated[str, Form()] = DEFAULT_PRESET,
     width_in: Annotated[float | None, Form()] = None,
     height_in: Annotated[float | None, Form()] = None,
     fit: Annotated[str, Form()] = "cover",
@@ -175,7 +175,7 @@ async def download_zpl(
 async def print_sticker(
     file: Annotated[UploadFile, File()],
     printer_name: Annotated[str, Form()],
-    preset: Annotated[str, Form()] = "4x6",
+    preset: Annotated[str, Form()] = DEFAULT_PRESET,
     width_in: Annotated[float | None, Form()] = None,
     height_in: Annotated[float | None, Form()] = None,
     fit: Annotated[str, Form()] = "cover",
@@ -215,7 +215,7 @@ async def print_sticker(
 @app.post("/api/calibrate")
 async def print_calibration(
     printer_name: Annotated[str, Form()],
-    preset: Annotated[str, Form()] = "4x6",
+    preset: Annotated[str, Form()] = DEFAULT_PRESET,
     width_in: Annotated[float | None, Form()] = None,
     height_in: Annotated[float | None, Form()] = None,
     darkness: Annotated[int, Form()] = 18,
@@ -248,7 +248,7 @@ async def print_calibration(
 @app.post("/api/media-calibrate")
 async def media_calibrate(
     printer_name: Annotated[str, Form()],
-    preset: Annotated[str, Form()] = "4x6",
+    preset: Annotated[str, Form()] = DEFAULT_PRESET,
     width_in: Annotated[float | None, Form()] = None,
     height_in: Annotated[float | None, Form()] = None,
 ) -> dict:
@@ -305,13 +305,33 @@ def _settings_from_form(
     }
 
 
-def _fit_check(print_image, settings: ProcessSettings) -> dict:
-    width, height = print_image.size
+def _fit_check(preview_image, settings: ProcessSettings) -> dict:
+    width, height = preview_image.size
+    ink_fill = _ink_fill_ratio(preview_image)
     return {
         "bitmap_width": width,
         "bitmap_height": height,
         "fits_one_label": width == settings.width_dots and height == settings.height_dots,
+        "ink_fill_ratio": round(ink_fill, 4),
+        "low_ink_fill": ink_fill < 0.85,
     }
+
+
+def _ink_fill_ratio(image) -> float:
+    """Share of label height (rows) that contain any ink."""
+    width, height = image.size
+    if height == 0 or width == 0:
+        return 0.0
+    pixels = image.load()
+    threshold = 240 if image.mode != "1" else 128
+    ink_rows = 0
+    for y in range(height):
+        for x in range(width):
+            value = pixels[x, y]
+            if value < threshold:
+                ink_rows += 1
+                break
+    return ink_rows / height
 
 
 async def _read_image(file: UploadFile, page: int = 1):

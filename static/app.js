@@ -140,6 +140,7 @@ function bindControls() {
 
 async function loadPresets() {
   const data = await fetchJson("/api/presets");
+  const defaultPreset = data.default || "4x6";
   els.preset.innerHTML = "";
   for (const preset of data.presets) {
     const option = document.createElement("option");
@@ -147,7 +148,7 @@ async function loadPresets() {
     option.dataset.widthIn = String(preset.width_in);
     option.dataset.heightIn = String(preset.height_in);
     option.textContent = `${preset.label} · ${Math.round(preset.width_in * 203)}×${Math.round(preset.height_in * 203)} dots`;
-    if (preset.id === "4x6") option.selected = true;
+    if (preset.id === defaultPreset) option.selected = true;
     els.preset.appendChild(option);
   }
   const custom = document.createElement("option");
@@ -283,9 +284,16 @@ async function runPreview() {
     applyZoom();
     els.meta.textContent = `${data.width_in.toFixed(2)}" × ${data.height_in.toFixed(2)}" · ${data.width_dots} × ${data.height_dots} dots @ 203 DPI`;
     if (data.fits_one_label) {
-      els.fitBadge.textContent = `Fits one ${data.width_in.toFixed(2)}" × ${data.height_in.toFixed(2)}" label. Bitmap is ${data.bitmap_width}×${data.bitmap_height} dots.`;
-      els.fitBadge.className = "fit-badge ok";
-      setStatus("Preview is one label. If a print still crosses a gap, calibrate media first.", "ok");
+      const fillPct = Math.round((data.ink_fill_ratio || 0) * 100);
+      if (data.low_ink_fill) {
+        els.fitBadge.textContent = `Ink covers ~${fillPct}% of label height — may look smaller than ${data.height_in.toFixed(2)}". Try Cover fit or adjust crop.`;
+        els.fitBadge.className = "fit-badge err";
+        setStatus("Preview letterboxes on the label. Switch to Cover or recrop to fill 4×6.", "err");
+      } else {
+        els.fitBadge.textContent = `Fits one ${data.width_in.toFixed(2)}" × ${data.height_in.toFixed(2)}" label. Bitmap is ${data.bitmap_width}×${data.bitmap_height} dots.`;
+        els.fitBadge.className = "fit-badge ok";
+        setStatus("Preview is one label. If a print still crosses a gap, calibrate media first.", "ok");
+      }
     } else {
       els.fitBadge.textContent = `Bitmap ${data.bitmap_width}×${data.bitmap_height} does not match the ${data.width_dots}×${data.height_dots} label.`;
       els.fitBadge.className = "fit-badge err";
@@ -551,7 +559,7 @@ function applySourceSuggestions(data) {
   }
   els.customSize.classList.toggle("hidden", els.preset.value !== "custom");
   if (state.labelLike) {
-    els.fit.value = "contain";
+    els.fit.value = cropMatchesPreset() ? "cover" : "contain";
     els.dither.value = "threshold";
     els.contrast.value = "1";
     els.contrastValue.textContent = "1.00";
@@ -598,10 +606,24 @@ function labelAspect() {
   return width / height;
 }
 
+function cropMatchesPreset() {
+  if (!state.detectedCrop || !state.sourceImage) return false;
+  const cropW = (state.detectedCrop.right - state.detectedCrop.left) * state.sourceImage.width;
+  const cropH = (state.detectedCrop.bottom - state.detectedCrop.top) * state.sourceImage.height;
+  if (cropW < 8 || cropH < 8) return false;
+  const cropAspect = cropW / cropH;
+  const labelAsp = labelAspect();
+  const tolerance = 0.12;
+  return (
+    Math.abs(cropAspect - labelAsp) <= tolerance ||
+    Math.abs(cropAspect - 1 / labelAsp) <= tolerance
+  );
+}
+
 function currentPresetInches() {
   const option = els.preset.selectedOptions[0];
   if (!option || els.preset.value === "custom") {
-    return { width: Number(els.widthIn.value) || 4, height: Number(els.heightIn.value) || 4 };
+    return { width: Number(els.widthIn.value) || 4, height: Number(els.heightIn.value) || 6 };
   }
   return {
     width: Number(option.dataset.widthIn) || 4,
