@@ -126,6 +126,7 @@ If the printer goes offline mid-batch, let it cool, reduce darkness, and try aga
 | [docs/PRINTER_SETUP.md](docs/PRINTER_SETUP.md) | Physical load, calibration, driver notes |
 | [docs/AI_IMAGE_GUIDE.md](docs/AI_IMAGE_GUIDE.md) | Pixel sizes, prompts, what survives 203 DPI |
 | [docs/BUILD.md](docs/BUILD.md) | Build the standalone Windows exe |
+| [docs/WINDOWS_APP_SPEC.md](docs/WINDOWS_APP_SPEC.md) | Full spec: web app → Windows desktop app (pywebview, PyInstaller, installer) |
 | [docs/RECREATE_PROMPT.md](docs/RECREATE_PROMPT.md) | Prompt to rebuild this app from scratch |
 
 ## License
