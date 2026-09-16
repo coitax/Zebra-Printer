@@ -16,7 +16,7 @@ PRESETS = {
     },
 }
 
-DEFAULT_PRESET = "4x4"
+DEFAULT_PRESET = "4x6"
 
 
 def size_to_dots(width_in: float, height_in: float) -> tuple[int, int]:

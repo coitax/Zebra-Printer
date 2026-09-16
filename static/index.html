@@ -21,13 +21,18 @@
       <main class="layout">
         <section class="panel drop-panel">
           <label class="drop" id="dropzone" for="file">
-            <input id="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden />
-            <strong>Drop an image</strong>
-            <span>PNG preferred. JPEG and WebP work too.</span>
+            <input id="file" type="file" accept="application/pdf,image/png,image/jpeg,image/webp,image/gif,image/tiff,.pdf,.png,.jpg,.jpeg,.webp,.tif,.tiff" hidden />
+            <strong>Drop a shipping label PDF or image</strong>
+            <span>4×6 labels on letter pages are auto-cropped.</span>
           </label>
           <p class="file-name" id="fileName">No file selected</p>
+          <label class="hidden page-row" id="pageRow">
+            Page
+            <input id="pdfPage" type="number" min="1" value="1" />
+            <span class="value" id="pdfPageCount"></span>
+          </label>
           <div class="actions compact">
-            <button type="button" id="cropBtn" disabled>Crop image</button>
+            <button type="button" id="cropBtn" disabled>Auto-crop label</button>
             <button type="button" id="resetCropBtn" disabled>Reset crop</button>
           </div>
         </section>
@@ -46,7 +51,7 @@
               </label>
               <label>
                 Height (in)
-                <input id="heightIn" type="number" min="0.25" max="39" step="0.01" value="4" />
+                <input id="heightIn" type="number" min="0.25" max="39" step="0.01" value="6" />
               </label>
             </div>
             <label>
@@ -57,7 +62,7 @@
                 <option value="stretch">Stretch</option>
               </select>
             </label>
-            <p class="hint">Images are cropped to exactly one label. 4×4 is 812×812 dots.</p>
+            <p class="hint">Shipping PDFs snap to 4×6 and fill one label. Drag the crop box if you need to nudge it.</p>
           </fieldset>
 
           <fieldset>
@@ -131,7 +136,7 @@
             <button type="button" id="mediaCalibrateBtn">Calibrate media</button>
           </div>
           <p class="hint" id="mediaHint">
-            If a print lands across two labels, the gap sensor is not synced. Load the 4×4 roll, close the
+            If a print lands across two labels, the gap sensor is not synced. Load the 4×6 roll, close the
             lid, click Calibrate media (it will feed a few labels), then press FEED once — it should stop
             exactly at the next gap.
           </p>

@@ -123,6 +123,11 @@ figcaption,
   font-size: 13px;
 }
 
+label.page-row {
+  grid-template-columns: auto 72px 1fr;
+  align-items: center;
+}
+
 fieldset {
   border: 1px solid var(--line);
   border-radius: 10px;

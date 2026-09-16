@@ -6,6 +6,11 @@ from typing import Literal
 
 from PIL import Image, ImageFilter, ImageOps
 
+PDF_RENDER_DPI = 406
+MAX_PDF_RENDER_PX = 4500
+SHIPPING_PRESET = "4x6"
+SHIPPING_ASPECT = 4.0 / 6.0
+
 FitMode = Literal["contain", "cover", "stretch"]
 DitherMode = Literal["floyd", "atkinson", "threshold"]
 
@@ -22,7 +27,45 @@ class ProcessSettings:
     crop: tuple[float, float, float, float] = (0.0, 0.0, 1.0, 1.0)
 
 
-def load_image(data: bytes) -> Image.Image:
+def is_pdf(data: bytes, filename: str = "") -> bool:
+    return data[:5] == b"%PDF-" or filename.lower().endswith(".pdf")
+
+
+def pdf_page_count(data: bytes) -> int:
+    import pypdfium2 as pdfium
+
+    pdf = pdfium.PdfDocument(data)
+    try:
+        return len(pdf)
+    finally:
+        pdf.close()
+
+
+def render_pdf_page(data: bytes, page: int = 1, dpi: float = PDF_RENDER_DPI) -> Image.Image:
+    import pypdfium2 as pdfium
+
+    pdf = pdfium.PdfDocument(data)
+    try:
+        count = len(pdf)
+        if count < 1:
+            raise ValueError("PDF has no pages")
+        index = max(0, min(count - 1, int(page) - 1))
+        pdf_page = pdf[index]
+        width_pt, height_pt = pdf_page.get_size()
+        scale = float(dpi) / 72.0
+        longest = max(width_pt, height_pt) * scale
+        if longest > MAX_PDF_RENDER_PX:
+            scale *= MAX_PDF_RENDER_PX / longest
+        bitmap = pdf_page.render(scale=scale)
+        image = bitmap.to_pil()
+    finally:
+        pdf.close()
+    return _flatten_to_rgb(image)
+
+
+def load_image(data: bytes, *, page: int = 1, filename: str = "") -> Image.Image:
+    if is_pdf(data, filename):
+        return render_pdf_page(data, page)
     image = Image.open(BytesIO(data))
     image.load()
     return _flatten_to_rgb(image)
@@ -45,6 +88,115 @@ def normalize_crop(crop: tuple[float, float, float, float]) -> tuple[float, floa
         bottom = min(1.0, top + 0.02)
         top = max(0.0, bottom - 0.02)
     return left, top, right, bottom
+
+
+def detect_content_crop(image: Image.Image) -> tuple[float, float, float, float]:
+    """Normalized crop around ink so a 4×6 label on letter paper is isolated."""
+    gray = ImageOps.grayscale(image)
+    work = gray
+    scale = 1.0
+    longest = max(gray.size)
+    if longest > 900:
+        scale = 900 / longest
+        work = gray.resize(
+            (max(1, round(gray.width * scale)), max(1, round(gray.height * scale))),
+            Image.Resampling.BILINEAR,
+        )
+    mask = work.point(lambda value: 255 if value < 240 else 0)
+    box = mask.getbbox()
+    if box is None:
+        return (0.0, 0.0, 1.0, 1.0)
+
+    left, top, right, bottom = (coord / scale for coord in box)
+    width, height = gray.size
+    pad = max(2.0, 0.006 * max(width, height))
+    left = max(0.0, left - pad)
+    top = max(0.0, top - pad)
+    right = min(float(width), right + pad)
+    bottom = min(float(height), bottom + pad)
+    crop = normalize_crop((left / width, top / height, right / width, bottom / height))
+    area = (crop[2] - crop[0]) * (crop[3] - crop[1])
+    if area >= 0.88:
+        return (0.0, 0.0, 1.0, 1.0)
+    return crop
+
+
+def expand_crop_to_aspect(
+    crop: tuple[float, float, float, float],
+    size: tuple[int, int],
+    target_aspect: float,
+) -> tuple[float, float, float, float]:
+    left, top, right, bottom = normalize_crop(crop)
+    img_w, img_h = size
+    if img_w < 2 or img_h < 2 or target_aspect <= 0:
+        return left, top, right, bottom
+
+    box_w = max(2.0, (right - left) * img_w)
+    box_h = max(2.0, (bottom - top) * img_h)
+    current = box_w / box_h
+    if current < target_aspect:
+        box_w = box_h * target_aspect
+    else:
+        box_h = box_w / target_aspect
+
+    frac_w = box_w / img_w
+    frac_h = box_h / img_h
+    if frac_w > 1:
+        frac_h *= 1 / frac_w
+        frac_w = 1.0
+    if frac_h > 1:
+        frac_w *= 1 / frac_h
+        frac_h = 1.0
+
+    center_x = (left + right) / 2
+    center_y = (top + bottom) / 2
+    left = min(max(0.0, center_x - frac_w / 2), 1.0 - frac_w)
+    top = min(max(0.0, center_y - frac_h / 2), 1.0 - frac_h)
+    return normalize_crop((left, top, left + frac_w, top + frac_h))
+
+
+def suggest_label_preset(
+    image: Image.Image,
+    crop: tuple[float, float, float, float],
+    filename: str = "",
+) -> str | None:
+    left, top, right, bottom = normalize_crop(crop)
+    width = (right - left) * image.width
+    height = (bottom - top) * image.height
+    if width < 8 or height < 8:
+        return None
+
+    aspect = width / height
+    name = filename.lower()
+    shipping_name = any(
+        token in name
+        for token in (
+            "shipment",
+            "shipping",
+            "postage",
+            "usps",
+            "ups",
+            "fedex",
+            "chit",
+            "label",
+        )
+    )
+    is_4x6 = abs(aspect - SHIPPING_ASPECT) <= 0.08 or abs(aspect - (1 / SHIPPING_ASPECT)) <= 0.12
+    if is_4x6 or shipping_name:
+        return SHIPPING_PRESET
+    return None
+
+
+def label_crop_for_image(image: Image.Image, filename: str = "") -> dict:
+    crop = detect_content_crop(image)
+    suggested = suggest_label_preset(image, crop, filename)
+    if suggested == SHIPPING_PRESET:
+        crop = expand_crop_to_aspect(crop, image.size, SHIPPING_ASPECT)
+    return {
+        "crop": crop,
+        "suggested_preset": suggested,
+        "label_like": suggested == SHIPPING_PRESET,
+    }
 
 
 def apply_crop(image: Image.Image, crop: tuple[float, float, float, float]) -> Image.Image:

@@ -9,7 +9,16 @@ from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.calibration import build_calibration_image
-from app.image_pipeline import ProcessSettings, image_to_png_bytes, load_image, normalize_crop, process_image
+from app.image_pipeline import (
+    ProcessSettings,
+    image_to_png_bytes,
+    is_pdf,
+    label_crop_for_image,
+    load_image,
+    normalize_crop,
+    pdf_page_count,
+    process_image,
+)
 from app.presets import PRESETS, resolve_size
 from app.printer import inspect_printer, list_printers, probe_printer, recommended_printer_name, send_raw, wait_until_idle
 from app.paths import resource_root
@@ -70,10 +79,38 @@ def probe(printer_name: Annotated[str, Form()]) -> dict:
         raise HTTPException(status_code=502, detail=f"Probe failed: {exc}") from exc
 
 
+@app.post("/api/source")
+async def source_preview(
+    file: Annotated[UploadFile, File()],
+    page: Annotated[int, Form()] = 1,
+) -> dict:
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file")
+    filename = file.filename or ""
+    try:
+        pages = pdf_page_count(data) if is_pdf(data, filename) else 1
+        image = load_image(data, page=page, filename=filename)
+        detected = label_crop_for_image(image, filename)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not read file: {exc}") from exc
+    left, top, right, bottom = detected["crop"]
+    return {
+        "pages": pages,
+        "page": max(1, min(pages, page)),
+        "width": image.width,
+        "height": image.height,
+        "png": _png_b64(image),
+        "crop": [left, top, right, bottom],
+        "suggested_preset": detected["suggested_preset"],
+        "label_like": detected["label_like"],
+    }
+
+
 @app.post("/api/preview")
 async def preview(
     file: Annotated[UploadFile, File()],
-    preset: Annotated[str, Form()] = "4x4",
+    preset: Annotated[str, Form()] = "4x6",
     width_in: Annotated[float | None, Form()] = None,
     height_in: Annotated[float | None, Form()] = None,
     fit: Annotated[str, Form()] = "cover",
@@ -82,11 +119,12 @@ async def preview(
     threshold: Annotated[int, Form()] = 128,
     sharpen: Annotated[str, Form()] = "true",
     crop: Annotated[str, Form()] = "0,0,1,1",
+    page: Annotated[int, Form()] = 1,
 ) -> dict:
     settings, inches = _settings_from_form(
         preset, width_in, height_in, fit, dither, contrast, threshold, sharpen, crop
     )
-    source = await _read_image(file)
+    source = await _read_image(file, page=page)
     gray, print_image = process_image(source, settings)
     return {
         **inches,
@@ -99,7 +137,7 @@ async def preview(
 @app.post("/api/zpl")
 async def download_zpl(
     file: Annotated[UploadFile, File()],
-    preset: Annotated[str, Form()] = "4x4",
+    preset: Annotated[str, Form()] = "4x6",
     width_in: Annotated[float | None, Form()] = None,
     height_in: Annotated[float | None, Form()] = None,
     fit: Annotated[str, Form()] = "cover",
@@ -111,11 +149,12 @@ async def download_zpl(
     speed: Annotated[int, Form()] = 2,
     copies: Annotated[int, Form()] = 1,
     crop: Annotated[str, Form()] = "0,0,1,1",
+    page: Annotated[int, Form()] = 1,
 ) -> PlainTextResponse:
     settings, _ = _settings_from_form(
         preset, width_in, height_in, fit, dither, contrast, threshold, sharpen, crop
     )
-    source = await _read_image(file)
+    source = await _read_image(file, page=page)
     _, print_image = process_image(source, settings)
     zpl = image_to_zpl(
         print_image,
@@ -136,7 +175,7 @@ async def download_zpl(
 async def print_sticker(
     file: Annotated[UploadFile, File()],
     printer_name: Annotated[str, Form()],
-    preset: Annotated[str, Form()] = "4x4",
+    preset: Annotated[str, Form()] = "4x6",
     width_in: Annotated[float | None, Form()] = None,
     height_in: Annotated[float | None, Form()] = None,
     fit: Annotated[str, Form()] = "cover",
@@ -148,11 +187,12 @@ async def print_sticker(
     speed: Annotated[int, Form()] = 2,
     copies: Annotated[int, Form()] = 1,
     crop: Annotated[str, Form()] = "0,0,1,1",
+    page: Annotated[int, Form()] = 1,
 ) -> dict:
     settings, inches = _settings_from_form(
         preset, width_in, height_in, fit, dither, contrast, threshold, sharpen, crop
     )
-    source = await _read_image(file)
+    source = await _read_image(file, page=page)
     _, print_image = process_image(source, settings)
     copies = max(1, min(99, int(copies)))
     _print_paced(
@@ -175,7 +215,7 @@ async def print_sticker(
 @app.post("/api/calibrate")
 async def print_calibration(
     printer_name: Annotated[str, Form()],
-    preset: Annotated[str, Form()] = "4x4",
+    preset: Annotated[str, Form()] = "4x6",
     width_in: Annotated[float | None, Form()] = None,
     height_in: Annotated[float | None, Form()] = None,
     darkness: Annotated[int, Form()] = 18,
@@ -208,7 +248,7 @@ async def print_calibration(
 @app.post("/api/media-calibrate")
 async def media_calibrate(
     printer_name: Annotated[str, Form()],
-    preset: Annotated[str, Form()] = "4x4",
+    preset: Annotated[str, Form()] = "4x6",
     width_in: Annotated[float | None, Form()] = None,
     height_in: Annotated[float | None, Form()] = None,
 ) -> dict:
@@ -274,14 +314,14 @@ def _fit_check(print_image, settings: ProcessSettings) -> dict:
     }
 
 
-async def _read_image(file: UploadFile):
+async def _read_image(file: UploadFile, page: int = 1):
     data = await file.read()
     if not data:
         raise HTTPException(status_code=400, detail="Empty file")
     try:
-        return load_image(data)
+        return load_image(data, page=page, filename=file.filename or "")
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Could not read image: {exc}") from exc
+        raise HTTPException(status_code=400, detail=f"Could not read file: {exc}") from exc
 
 
 def _png_b64(image) -> str:

@@ -4,7 +4,12 @@ const state = {
   previewTimer: null,
   sourceImage: null,
   crop: { left: 0, top: 0, right: 1, bottom: 1 },
+  detectedCrop: null,
+  suggestedPreset: null,
+  labelLike: false,
   drag: null,
+  page: 1,
+  pages: 1,
 };
 
 const els = {
@@ -46,6 +51,9 @@ const els = {
   cropBox: document.getElementById("cropBox"),
   cropCanvas: document.getElementById("cropCanvas"),
   lockAspect: document.getElementById("lockAspect"),
+  pageRow: document.getElementById("pageRow"),
+  pdfPage: document.getElementById("pdfPage"),
+  pdfPageCount: document.getElementById("pdfPageCount"),
 };
 
 init();
@@ -62,19 +70,18 @@ function bindControls() {
   });
 
   ["dragenter", "dragover"].forEach((eventName) => {
-    els.dropzone.addEventListener(eventName, (event) => {
+    document.addEventListener(eventName, (event) => {
       event.preventDefault();
-      els.dropzone.classList.add("drag");
+      if (hasFiles(event)) els.dropzone.classList.add("drag");
     });
   });
-  ["dragleave", "drop"].forEach((eventName) => {
-    els.dropzone.addEventListener(eventName, (event) => {
-      event.preventDefault();
-      els.dropzone.classList.remove("drag");
-    });
+  document.addEventListener("dragleave", (event) => {
+    if (!event.relatedTarget) els.dropzone.classList.remove("drag");
   });
-  els.dropzone.addEventListener("drop", (event) => {
-    const file = event.dataTransfer.files[0];
+  document.addEventListener("drop", (event) => {
+    event.preventDefault();
+    els.dropzone.classList.remove("drag");
+    const file = event.dataTransfer?.files?.[0];
     if (file) setFile(file);
   });
 
@@ -110,16 +117,23 @@ function bindControls() {
   els.probeBtn.addEventListener("click", () => probePrinter());
   els.refreshPrintersBtn.addEventListener("click", () => loadPrinters({ probe: true }));
   els.printer.addEventListener("change", () => probePrinter());
-  els.cropBtn.addEventListener("click", () => showCropper());
+  els.cropBtn.addEventListener("click", () => applyDetectedCrop({ preview: true }));
   els.resetCropBtn.addEventListener("click", () => resetCrop());
   els.lockAspect.addEventListener("change", () => {
     if (els.lockAspect.checked) applyAspectToCrop();
     drawCropper();
     queuePreview();
   });
+  els.pdfPage.addEventListener("change", () => {
+    if (!state.file) return;
+    state.page = Math.max(1, Math.min(state.pages, Number(els.pdfPage.value) || 1));
+    els.pdfPage.value = String(state.page);
+    loadSourceImage(state.file);
+  });
   els.preset.addEventListener("change", () => {
-    if (els.lockAspect.checked && state.sourceImage) applyAspectToCrop();
+    if (els.lockAspect.checked && state.sourceImage) fitCurrentCropToAspect();
     drawCropper();
+    queuePreview();
   });
   bindCropper();
 }
@@ -133,7 +147,7 @@ async function loadPresets() {
     option.dataset.widthIn = String(preset.width_in);
     option.dataset.heightIn = String(preset.height_in);
     option.textContent = `${preset.label} · ${Math.round(preset.width_in * 203)}×${Math.round(preset.height_in * 203)} dots`;
-    if (preset.id === "4x4") option.selected = true;
+    if (preset.id === "4x6") option.selected = true;
     els.preset.appendChild(option);
   }
   const custom = document.createElement("option");
@@ -212,14 +226,34 @@ function setProbe(state, label, message) {
   els.probeMsg.textContent = message;
 }
 
-function setFile(file) {
+function hasFiles(event) {
+  return Array.from(event.dataTransfer?.types || []).includes("Files");
+}
+
+function isSupportedFile(file) {
+  if (isPdfFile(file) || (file.type && file.type.startsWith("image/"))) return true;
+  if (file.type === "application/octet-stream" || !file.type) return true;
+  return /\.(png|jpe?g|webp|gif|bmp|tif{1,2}|pdf)$/i.test(file.name);
+}
+
+async function setFile(file) {
+  if (!(await looksLikePrintFile(file))) {
+    setStatus("Drop a PDF or image (PNG, JPEG, WebP, TIFF).", "err");
+    return;
+  }
   state.file = file;
-  els.fileName.textContent = file.name;
+  state.page = 1;
+  state.pages = 1;
+  state.detectedCrop = null;
+  state.suggestedPreset = null;
+  state.labelLike = false;
+  els.pdfPage.value = "1";
+  els.fileName.textContent = file.name || "Dropped file";
   els.printBtn.disabled = false;
   els.zplBtn.disabled = false;
   els.cropBtn.disabled = false;
   els.resetCropBtn.disabled = false;
-  loadSourceImage(file);
+  loadRenderedSource(file);
 }
 
 function onSettingsChange() {
@@ -391,6 +425,7 @@ function appendShared(body) {
     "crop",
     `${state.crop.left},${state.crop.top},${state.crop.right},${state.crop.bottom}`
   );
+  body.append("page", String(state.page));
 }
 
 async function postForm(url) {
@@ -419,20 +454,75 @@ function setStatus(message, kind) {
   els.status.className = `status${kind ? ` ${kind}` : ""}`;
 }
 
+function isPdfFile(file) {
+  return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+}
+
+async function looksLikePrintFile(file) {
+  if (isSupportedFile(file) || isPdfFile(file)) return true;
+  return (await sniffKind(file)) !== "unknown";
+}
+
+async function sniffKind(file) {
+  try {
+    const header = new Uint8Array(await file.slice(0, 8).arrayBuffer());
+    if (header[0] === 0x25 && header[1] === 0x50 && header[2] === 0x44 && header[3] === 0x46) {
+      return "pdf";
+    }
+    if (header[0] === 0x89 && header[1] === 0x50 && header[2] === 0x4e && header[3] === 0x47) return "image";
+    if (header[0] === 0xff && header[1] === 0xd8) return "image";
+    if (header[0] === 0x47 && header[1] === 0x49 && header[2] === 0x46) return "image";
+    if (header[0] === 0x42 && header[1] === 0x4d) return "image";
+    if ((header[0] === 0x49 && header[1] === 0x49) || (header[0] === 0x4d && header[1] === 0x4d)) return "image";
+    if (header[0] === 0x52 && header[1] === 0x49 && header[2] === 0x46 && header[3] === 0x46) return "image";
+  } catch {
+    return "unknown";
+  }
+  return "unknown";
+}
+
 function loadSourceImage(file) {
-  const url = URL.createObjectURL(file);
-  const image = new Image();
-  image.onload = () => {
-    URL.revokeObjectURL(url);
-    state.sourceImage = image;
-    resetCrop({ preview: true });
-    showCropper();
-  };
-  image.onerror = () => {
-    URL.revokeObjectURL(url);
-    setStatus("Could not read that image for cropping.", "err");
-  };
-  image.src = url;
+  loadRenderedSource(file);
+}
+
+async function loadRenderedSource(file) {
+  setStatus("Reading file…");
+  const body = new FormData();
+  body.append("file", file);
+  body.append("page", String(state.page));
+  try {
+    const response = await fetch("/api/source", { method: "POST", body });
+    if (!response.ok) throw new Error(await errorMessage(response));
+    const data = await response.json();
+    setPageControls(data.page, data.pages);
+    const image = new Image();
+    image.onload = () => {
+      state.sourceImage = image;
+      applySourceSuggestions(data);
+      showCropper();
+      queuePreview();
+      if (state.labelLike) {
+        setStatus("Found the 4×6 shipping label. It will fill the sticker. Drag the crop box if needed.", "ok");
+      } else {
+        setStatus("File ready. Crop if you need to, then print.", "ok");
+      }
+    };
+    image.onerror = () => {
+      setStatus("The server read the file, but the preview image failed to load.", "err");
+    };
+    image.src = `data:image/png;base64,${data.png}`;
+  } catch (error) {
+    setStatus(error.message, "err");
+  }
+}
+
+function setPageControls(page, pages) {
+  state.page = page;
+  state.pages = pages;
+  els.pdfPage.value = String(page);
+  els.pdfPage.max = String(pages);
+  els.pdfPageCount.textContent = pages > 1 ? `of ${pages}` : "";
+  els.pageRow.classList.toggle("hidden", pages <= 1);
 }
 
 function showCropper() {
@@ -440,6 +530,55 @@ function showCropper() {
   els.cropBox.classList.remove("hidden");
   sizeCropCanvas();
   drawCropper();
+}
+
+function cropFromList(values) {
+  if (!values || values.length !== 4) return null;
+  const [left, top, right, bottom] = values.map(Number);
+  if ([left, top, right, bottom].some((value) => Number.isNaN(value))) return null;
+  return { left, top, right, bottom };
+}
+
+function applySourceSuggestions(data) {
+  state.detectedCrop = cropFromList(data.crop);
+  state.suggestedPreset = data.suggested_preset || "4x6";
+  state.labelLike = Boolean(data.label_like);
+  const presetId = state.suggestedPreset;
+  if (presetId && [...els.preset.options].some((option) => option.value === presetId)) {
+    els.preset.value = presetId;
+  } else {
+    els.preset.value = "4x6";
+  }
+  els.customSize.classList.toggle("hidden", els.preset.value !== "custom");
+  if (state.labelLike) {
+    els.fit.value = "contain";
+    els.dither.value = "threshold";
+    els.contrast.value = "1";
+    els.contrastValue.textContent = "1.00";
+    els.sharpen.checked = false;
+    updateThresholdVisibility();
+  }
+  if (state.detectedCrop) {
+    state.crop = { ...state.detectedCrop };
+    if (els.lockAspect.checked) fitCurrentCropToAspect();
+  } else {
+    resetCrop({ preview: false });
+  }
+  drawCropper();
+}
+
+function applyDetectedCrop({ preview = true } = {}) {
+  if (!state.sourceImage) return;
+  if (state.detectedCrop) {
+    state.crop = { ...state.detectedCrop };
+    if (state.suggestedPreset) els.preset.value = state.suggestedPreset;
+    if (els.lockAspect.checked) fitCurrentCropToAspect();
+    showCropper();
+    if (preview) queuePreview();
+    setStatus("Auto-cropped to the shipping label.", "ok");
+    return;
+  }
+  if (state.file) loadSourceImage(state.file);
 }
 
 function resetCrop({ preview = true } = {}) {
@@ -472,19 +611,52 @@ function currentPresetInches() {
 
 function applyAspectToCrop() {
   if (!state.sourceImage) return;
-  const aspect = labelAspect();
-  const imageAspect = state.sourceImage.width / state.sourceImage.height;
-  let width = 1;
-  let height = 1;
-  if (imageAspect > aspect) {
-    width = aspect / imageAspect;
-    height = 1;
-  } else {
-    width = 1;
-    height = imageAspect / aspect;
-  }
+  const { width, height } = largestAspectBox();
   const left = (1 - width) / 2;
   const top = (1 - height) / 2;
+  state.crop = { left, top, right: left + width, bottom: top + height };
+}
+
+function largestAspectBox() {
+  const aspect = labelAspect();
+  const imageAspect = state.sourceImage.width / state.sourceImage.height;
+  if (imageAspect > aspect) {
+    return { width: aspect / imageAspect, height: 1 };
+  }
+  return { width: 1, height: imageAspect / aspect };
+}
+
+function fitCurrentCropToAspect() {
+  if (!state.sourceImage) return;
+  const aspect = labelAspect();
+  const imageAspect = state.sourceImage.width / state.sourceImage.height;
+  const target = aspect / imageAspect;
+  const current = state.crop;
+  const isFull =
+    current.left <= 0.001 && current.top <= 0.001 && current.right >= 0.999 && current.bottom >= 0.999;
+  if (isFull) {
+    applyAspectToCrop();
+    return;
+  }
+  let width = current.right - current.left;
+  let height = current.bottom - current.top;
+  const centerX = (current.left + current.right) / 2;
+  const centerY = (current.top + current.bottom) / 2;
+  if (width / height < target) {
+    width = height * target;
+  } else {
+    height = width / target;
+  }
+  if (width > 1) {
+    height *= 1 / width;
+    width = 1;
+  }
+  if (height > 1) {
+    width *= 1 / height;
+    height = 1;
+  }
+  const left = clamp(centerX - width / 2, 0, 1 - width);
+  const top = clamp(centerY - height / 2, 0, 1 - height);
   state.crop = { left, top, right: left + width, bottom: top + height };
 }
 
