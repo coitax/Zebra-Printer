@@ -42,7 +42,7 @@
               </label>
               <label>
                 Height (in)
-                <input id="heightIn" type="number" min="0.25" max="39" step="0.01" value="4" />
+                <input id="heightIn" type="number" min="0.25" max="39" step="0.01" value="6" />
               </label>
             </div>
             <label>
@@ -53,7 +53,7 @@
                 <option value="stretch">Stretch</option>
               </select>
             </label>
-            <p class="hint">Images are cropped to exactly one label. 4×4 is 812×812 dots.</p>
+            <p class="hint">Images are cropped to exactly one label. Default 4×6 is 812×1218 dots.</p>
           </fieldset>
 
           <fieldset>
@@ -123,7 +123,7 @@
             <button type="button" id="mediaCalibrateBtn">Calibrate media</button>
           </div>
           <p class="hint" id="mediaHint">
-            If a print lands across two labels, the gap sensor is not synced. Load the 4×4 roll, close the
+            If a print lands across two labels, the gap sensor is not synced. Load your label roll, close the
             lid, click Calibrate media (it will feed a few labels), then press FEED once — it should stop
             exactly at the next gap.
           </p>

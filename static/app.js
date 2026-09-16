@@ -111,7 +111,7 @@ async function loadPresets() {
     const option = document.createElement("option");
     option.value = preset.id;
     option.textContent = `${preset.label} · ${Math.round(preset.width_in * 203)}×${Math.round(preset.height_in * 203)} dots`;
-    if (preset.id === "4x4") option.selected = true;
+    if (preset.id === data.default) option.selected = true;
     els.preset.appendChild(option);
   }
   const custom = document.createElement("option");
@@ -299,7 +299,7 @@ async function printCalibration() {
   try {
     const response = await fetch("/api/calibrate", { method: "POST", body });
     if (!response.ok) throw new Error(await errorMessage(response));
-    setStatus("One-label test sent. The black box must stay on a single 4×4 sticker.", "ok");
+    setStatus("One-label test sent. The black box must stay on a single label.", "ok");
   } catch (error) {
     setStatus(error.message, "err");
   }
