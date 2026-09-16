@@ -123,6 +123,11 @@ figcaption,
   font-size: 13px;
 }
 
+label.page-row {
+  grid-template-columns: auto 72px 1fr;
+  align-items: center;
+}
+
 fieldset {
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -332,13 +337,15 @@ figcaption {
 }
 
 .frame {
-  min-height: 280px;
+  height: 240px;
+  min-height: 240px;
+  max-height: 240px;
   background: var(--frame);
   border-radius: 10px;
   overflow: auto;
   display: grid;
   place-items: center;
-  padding: 16px;
+  padding: 12px;
 }
 
 .frame.zebra {
@@ -347,14 +354,53 @@ figcaption {
 }
 
 .frame img {
-  image-rendering: pixelated;
   background: #fff;
   max-width: none;
   outline: 2px solid var(--accent);
+  image-rendering: auto;
+}
+
+.frame img.fit {
+  max-width: 216px;
+  max-height: 216px;
+  width: auto;
+  height: auto;
+  image-rendering: auto;
+}
+
+.frame img.dots {
+  image-rendering: pixelated;
 }
 
 .placeholder {
   margin: 0;
+}
+
+.crop-box {
+  margin: 0 0 16px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #16130f;
+}
+
+.crop-stage {
+  margin-top: 10px;
+  background: #0c0a08;
+  border-radius: 8px;
+  overflow: hidden;
+  width: 320px;
+  height: 220px;
+  max-width: 100%;
+}
+
+#cropCanvas {
+  display: block;
+  width: 320px;
+  height: 220px;
+  max-width: 100%;
+  cursor: crosshair;
+  touch-action: none;
 }
 
 @media (max-width: 960px) {

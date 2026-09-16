@@ -193,6 +193,18 @@ def probe_printer(printer_name: str) -> ProbeResult:
     return result
 
 
+def wait_until_idle(printer_name: str, timeout: float = 45.0) -> None:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        details = _printer_details(printer_name)
+        busy = details["jobs"] > 0 or any(
+            flag in details["status_text"] for flag in ("printing", "I/O active", "processing", "busy")
+        )
+        if not busy:
+            return
+        time.sleep(0.25)
+
+
 def send_raw(printer_name: str, payload: str | bytes, job_name: str = "GK420D Sticker") -> None:
     win32print = _win32print()
     data = payload.encode("ascii") if isinstance(payload, str) else payload

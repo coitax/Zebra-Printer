@@ -21,11 +21,20 @@
       <main class="layout">
         <section class="panel drop-panel">
           <label class="drop" id="dropzone" for="file">
-            <input id="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden />
-            <strong>Drop an image</strong>
-            <span>PNG preferred. JPEG and WebP work too.</span>
+            <input id="file" type="file" accept="application/pdf,image/png,image/jpeg,image/webp,image/gif,image/tiff,.pdf,.png,.jpg,.jpeg,.webp,.tif,.tiff" hidden />
+            <strong>Drop a shipping label PDF or image</strong>
+            <span>4×6 labels on letter pages are auto-cropped.</span>
           </label>
           <p class="file-name" id="fileName">No file selected</p>
+          <label class="hidden page-row" id="pageRow">
+            Page
+            <input id="pdfPage" type="number" min="1" value="1" />
+            <span class="value" id="pdfPageCount"></span>
+          </label>
+          <div class="actions compact">
+            <button type="button" id="cropBtn" disabled>Auto-crop label</button>
+            <button type="button" id="resetCropBtn" disabled>Reset crop</button>
+          </div>
         </section>
 
         <section class="panel controls">
@@ -42,7 +51,7 @@
               </label>
               <label>
                 Height (in)
-                <input id="heightIn" type="number" min="0.25" max="39" step="0.01" value="4" />
+                <input id="heightIn" type="number" min="0.25" max="39" step="0.01" value="6" />
               </label>
             </div>
             <label>
@@ -53,7 +62,7 @@
                 <option value="stretch">Stretch</option>
               </select>
             </label>
-            <p class="hint">Images are cropped to exactly one label. 4×4 is 812×812 dots.</p>
+            <p class="hint">Shipping PDFs snap to 4×6 and fill one label. Drag the crop box if you need to nudge it.</p>
           </fieldset>
 
           <fieldset>
@@ -114,6 +123,10 @@
               Copies
               <input id="copies" type="number" min="1" max="99" value="1" />
             </label>
+            <p class="hint">
+              Batches print one sticker at a time with a pause. If the printer dies on the 3rd label,
+              use the original 20V brick in a wall outlet, darkness 12–15, and 3 ips.
+            </p>
           </fieldset>
 
           <div class="actions">
@@ -123,7 +136,7 @@
             <button type="button" id="mediaCalibrateBtn">Calibrate media</button>
           </div>
           <p class="hint" id="mediaHint">
-            If a print lands across two labels, the gap sensor is not synced. Load the 4×4 roll, close the
+            If a print lands across two labels, the gap sensor is not synced. Load the 4×6 roll, close the
             lid, click Calibrate media (it will feed a few labels), then press FEED once — it should stop
             exactly at the next gap.
           </p>
@@ -134,12 +147,26 @@
           <div class="preview-head">
             <h2>What will print</h2>
             <div class="zoom">
-              <button type="button" data-zoom="1" class="active">1×</button>
+              <button type="button" data-zoom="fit" class="active">Fit</button>
+              <button type="button" data-zoom="1">1×</button>
               <button type="button" data-zoom="2">2×</button>
             </div>
           </div>
           <p class="meta" id="meta">Import an image to see the 203 DPI bitmap.</p>
           <p class="fit-badge" id="fitBadge">Waiting for a one-label preview</p>
+          <section class="crop-box hidden" id="cropBox">
+            <div class="preview-head">
+              <h2>Crop</h2>
+              <label class="check">
+                <input id="lockAspect" type="checkbox" checked />
+                Lock to label shape
+              </label>
+            </div>
+            <div class="crop-stage">
+              <canvas id="cropCanvas" width="640" height="480"></canvas>
+            </div>
+            <p class="hint">Drag inside the box to move it. Drag a corner or edge to resize. Only this area is printed.</p>
+          </section>
           <div class="preview-grid">
             <figure>
               <figcaption>Resized grayscale</figcaption>

@@ -17,6 +17,20 @@ If a print lands across two labels, or sits in the middle of two stickers, the p
 3. Press **FEED** once. It should advance **exactly one** label and stop at the tear bar.
 4. Click **Print one-label test**. The black box must stay on a single sticker.
 
+## Printer shuts off on the 3rd sticker
+
+A full 4×4 graphic at 2 ips and high darkness is a heavy load for the GK420D / GX420d brick. The head draws a surge on every black area; after two labels the supply overheats and the printer goes dark mid-batch.
+
+Check this first:
+
+1. Use the **original Zebra 20V** power supply, not a generic laptop brick.
+2. Plug it into a **wall outlet**, not a cheap power strip or USB-C trigger.
+3. Feel the brick after two prints — if it is very hot, that is the failure.
+4. For batches: darkness **12–15**, speed **3 ips**.
+5. Let it sit 30 seconds after a shutdown before powering back on.
+
+The app now downloads the graphic once and prints copies one at a time with a pause so the supply can recover.
+
 If FEED still runs two labels:
 
 - Wipe the gap sensor window under the head

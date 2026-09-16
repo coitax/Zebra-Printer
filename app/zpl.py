@@ -30,16 +30,47 @@ def image_to_zpl(
     hex_data = payload.hex().upper()
     darkness = max(-30, min(30, int(darkness)))
     speed = max(2, min(5, int(speed)))
-    copies = max(1, min(99, int(copies)))
-
     return (
         f"{label_setup(label_width, label_height)}"
         f"^PR{speed}\n"
         f"^MD{darkness}\n"
         f"^FO{x},{y}^GFA,{total_bytes},{total_bytes},{bytes_per_row},{hex_data}^FS\n"
-        f"^PQ{copies}\n"
         "^XZ\n"
     )
+
+
+def graphic_batch_jobs(
+    image: Image.Image,
+    *,
+    darkness: int = 18,
+    speed: int = 2,
+    label_width: int | None = None,
+    label_height: int | None = None,
+    name: str = "STICK.GRF",
+) -> tuple[str, str, str]:
+    """Download once, print by recall, then delete the stored graphic."""
+    bitmap = image.convert("1")
+    label_width = min(MAX_WIDTH_DOTS, label_width or bitmap.width)
+    label_height = min(MAX_HEIGHT_DOTS, label_height or bitmap.height)
+    if bitmap.width != label_width or bitmap.height != label_height:
+        canvas = Image.new("1", (label_width, label_height), 1)
+        canvas.paste(bitmap.crop((0, 0, label_width, label_height)), (0, 0))
+        bitmap = canvas
+
+    payload, bytes_per_row = pack_bitmap(bitmap)
+    hex_data = payload.hex().upper()
+    darkness = max(-30, min(30, int(darkness)))
+    speed = max(2, min(5, int(speed)))
+    download = f"~DGR:{name},{len(payload)},{bytes_per_row},{hex_data}\n"
+    print_one = (
+        f"{label_setup(label_width, label_height)}"
+        f"^PR{speed}\n"
+        f"^MD{darkness}\n"
+        f"^FO0,0^XGR:{name},1,1^FS\n"
+        "^XZ\n"
+    )
+    cleanup = f"^XA^IDR:{name}^FS^XZ\n"
+    return download, print_one, cleanup
 
 
 def media_calibrate_zpl(width_dots: int, height_dots: int) -> str:
