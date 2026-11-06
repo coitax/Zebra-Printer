@@ -16,8 +16,4 @@ if errorlevel 1 (
   ".venv\Scripts\python.exe" -m pip install -q -r requirements.txt
 )
 
-for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":8765" ^| findstr "LISTENING"') do (
-  taskkill /F /PID %%a >nul 2>&1
-)
-
 start "" ".venv\Scripts\pythonw.exe" "%~dp0desktop.py"

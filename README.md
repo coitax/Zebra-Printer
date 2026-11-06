@@ -22,13 +22,13 @@ Default label size is **4" × 6"** (812 × 1218 dots), suited for shipping label
 
 Alternatives:
 
-- **`run-app.bat`** — same UI in a desktop window (uses Python + pywebview).
+- **`run-app.bat`** — same UI in a desktop window (Python + pywebview, **no local HTTP server**).
 - **`web.bat`** — opens the browser if the server is already running.
 - **`install-web-shortcut.bat`** — adds a Desktop shortcut to launch via `run.bat`.
 
 ### Standalone Windows app (no Python)
 
-The packaged **`.exe` is fully standalone**: double-click it and the UI opens in a desktop window. It starts a **local server on `127.0.0.1:8765` inside the same process** (you do not run `run.bat` or a separate server).
+The packaged **`.exe` is fully standalone**: double-click it and the UI opens in a single desktop process. The window loads `static/index.html` from disk and talks to Python through **pywebview’s js_api** — there is **no localhost HTTP server** and no port **8765** (unlike `run.bat` browser mode).
 
 Build from the repo on Windows:
 
@@ -48,7 +48,7 @@ Output: `dist\installer\GK420D-Sticker-Printer-Setup.exe`
 
 More detail: [docs/BUILD.md](docs/BUILD.md) or download a release.
 
-If the app says the server failed to start, **port 8765 may be busy** — close other GK420D Sticker Printer windows, dev `run.bat` sessions, or anything else listening on that port, then launch again. Logs: `%LOCALAPPDATA%\GK420D Sticker Printer\desktop.log`.
+Desktop / exe logs: `%LOCALAPPDATA%\GK420D Sticker Printer\desktop.log`. Browser mode (`run.bat`) still uses port **8765**; if that page will not load, close stale listeners and restart `run.bat`.
 
 ## Print a sticker
 
@@ -121,7 +121,7 @@ If the printer goes offline mid-batch, let it cool, reduce darkness, and try aga
 | Problem | What to try |
 | --- | --- |
 | Browser does not open / page won't load | Check the console window is still open. Another app may be using port **8765** — `run.bat` kills stale listeners on startup; restart `run.bat`. |
-| Standalone exe won't start / server error | Close other instances and anything on port **8765**. See `%LOCALAPPDATA%\GK420D Sticker Printer\desktop.log`. |
+| Standalone exe won't start | See `%LOCALAPPDATA%\GK420D Sticker Printer\desktop.log`. Reinstall from a fresh `build.bat` output folder. |
 | Print spans two labels or wrong length | **Calibrate media** for the size preset you selected. See section above. |
 | Print looks like a small square on a tall label | Size preset may not match stock (e.g. 4×4 preset on 4×6 paper). Select the correct size and recalibrate. |
 | Preview shows low ink fill / white bands | Switch **Fit** from Contain to **Cover**, or adjust the crop box. |

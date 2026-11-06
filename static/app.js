@@ -57,10 +57,69 @@ const els = {
   pdfPageCount: document.getElementById("pdfPageCount"),
 };
 
+/** True when pywebview injected the Python js_api (desktop / frozen exe). */
+function useBridge() {
+  return Boolean(window.pywebview?.api);
+}
+
+function bridgeReady() {
+  return new Promise((resolve) => {
+    if (window.pywebview?.api) {
+      resolve();
+      return;
+    }
+    window.addEventListener("pywebviewready", () => resolve(), { once: true });
+  });
+}
+
+async function fileToBase64(file) {
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+async function bridgeParams(withFile = true) {
+  const params = {
+    preset: els.preset.value,
+    width_in: els.widthIn.value,
+    height_in: els.heightIn.value,
+    fit: els.fit.value,
+    dither: els.dither.value,
+    contrast: els.contrast.value,
+    threshold: els.threshold.value,
+    sharpen: els.sharpen.checked ? "true" : "false",
+    darkness: els.darkness.value,
+    speed: els.speed.value,
+    copies: els.copies.value,
+    crop: `${state.crop.left},${state.crop.top},${state.crop.right},${state.crop.bottom}`,
+    page: state.page,
+    printer_name: els.printer.value,
+  };
+  if (withFile && state.file) {
+    params.file_b64 = await fileToBase64(state.file);
+    params.filename = state.file.name || "";
+  }
+  return params;
+}
+
+async function callBridge(fn) {
+  try {
+    return await fn();
+  } catch (error) {
+    throw new Error(error?.message || String(error));
+  }
+}
+
 init();
 
 async function init() {
   bindControls();
+  await bridgeReady();
   await Promise.all([loadPresets(), loadPrinters()]);
   updateThresholdVisibility();
 }
@@ -140,7 +199,9 @@ function bindControls() {
 }
 
 async function loadPresets() {
-  const data = await fetchJson("/api/presets");
+  const data = useBridge()
+    ? await callBridge(() => window.pywebview.api.get_presets())
+    : await fetchJson("/api/presets");
   const defaultPreset = data.default || "4x6";
   if (els.appBuild && data.build) els.appBuild.textContent = data.build;
   els.preset.innerHTML = "";
@@ -161,7 +222,9 @@ async function loadPresets() {
 
 async function loadPrinters({ probe = true } = {}) {
   try {
-    const data = await fetchJson("/api/printers");
+    const data = useBridge()
+      ? await callBridge(() => window.pywebview.api.get_printers())
+      : await fetchJson("/api/printers");
     els.printer.innerHTML = "";
     if (!data.printers.length) {
       els.printer.innerHTML = '<option value="">No Windows printers found</option>';
@@ -198,11 +261,15 @@ async function probePrinter() {
   }
   setProbe("checking", "Checking…", "Asking Windows and the printer for an identity reply.");
   try {
-    const body = new FormData();
-    body.append("printer_name", els.printer.value);
-    const response = await fetch("/api/printers/probe", { method: "POST", body });
-    if (!response.ok) throw new Error(await errorMessage(response));
-    const data = await response.json();
+    const data = useBridge()
+      ? await callBridge(() => window.pywebview.api.probe_printer(els.printer.value))
+      : await (async () => {
+          const body = new FormData();
+          body.append("printer_name", els.printer.value);
+          const response = await fetch("/api/printers/probe", { method: "POST", body });
+          if (!response.ok) throw new Error(await errorMessage(response));
+          return response.json();
+        })();
     const details = [data.message];
     if (data.port) details.push(`Port ${data.port}`);
     if (data.driver) details.push(data.driver);
@@ -360,9 +427,16 @@ async function downloadZpl() {
   if (!state.file) return;
   setStatus("Building ZPL…");
   try {
-    const response = await fetch("/api/zpl", { method: "POST", body: buildForm() });
-    if (!response.ok) throw new Error(await errorMessage(response));
-    const blob = await response.blob();
+    let blob;
+    if (useBridge()) {
+      const params = await bridgeParams(true);
+      const zpl = await callBridge(() => window.pywebview.api.build_zpl(params));
+      blob = new Blob([zpl], { type: "application/octet-stream" });
+    } else {
+      const response = await fetch("/api/zpl", { method: "POST", body: buildForm() });
+      if (!response.ok) throw new Error(await errorMessage(response));
+      blob = await response.blob();
+    }
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -380,13 +454,18 @@ async function printCalibration() {
     setStatus("Choose a printer first.", "err");
     return;
   }
-  const body = new FormData();
-  appendShared(body);
-  body.append("printer_name", els.printer.value);
   setStatus("Printing calibration label…");
   try {
-    const response = await fetch("/api/calibrate", { method: "POST", body });
-    if (!response.ok) throw new Error(await errorMessage(response));
+    if (useBridge()) {
+      const params = await bridgeParams(false);
+      await callBridge(() => window.pywebview.api.calibrate(params));
+    } else {
+      const body = new FormData();
+      appendShared(body);
+      body.append("printer_name", els.printer.value);
+      const response = await fetch("/api/calibrate", { method: "POST", body });
+      if (!response.ok) throw new Error(await errorMessage(response));
+    }
     setStatus("One-label test sent. The black box must stay on a single 4×4 sticker.", "ok");
   } catch (error) {
     setStatus(error.message, "err");
@@ -398,13 +477,18 @@ async function calibrateMedia() {
     setStatus("Choose a printer first.", "err");
     return;
   }
-  const body = new FormData();
-  appendShared(body);
-  body.append("printer_name", els.printer.value);
   setStatus("Calibrating media — the printer will feed a few labels…");
   try {
-    const response = await fetch("/api/media-calibrate", { method: "POST", body });
-    if (!response.ok) throw new Error(await errorMessage(response));
+    if (useBridge()) {
+      const params = await bridgeParams(false);
+      await callBridge(() => window.pywebview.api.media_calibrate(params));
+    } else {
+      const body = new FormData();
+      appendShared(body);
+      body.append("printer_name", els.printer.value);
+      const response = await fetch("/api/media-calibrate", { method: "POST", body });
+      if (!response.ok) throw new Error(await errorMessage(response));
+    }
     setStatus("Calibration sent. When it stops, press FEED once. It should advance exactly one label.", "ok");
   } catch (error) {
     setStatus(error.message, "err");
@@ -439,6 +523,16 @@ function appendShared(body) {
 }
 
 async function postForm(url) {
+  if (useBridge()) {
+    const params = await bridgeParams(true);
+    if (url === "/api/preview") {
+      return callBridge(() => window.pywebview.api.preview(params));
+    }
+    if (url === "/api/print") {
+      return callBridge(() => window.pywebview.api.print_sticker(params));
+    }
+    throw new Error(`Unknown bridge route: ${url}`);
+  }
   const response = await fetch(url, { method: "POST", body: buildForm() });
   if (!response.ok) throw new Error(await errorMessage(response));
   return response.json();
@@ -497,13 +591,21 @@ function loadSourceImage(file) {
 
 async function loadRenderedSource(file) {
   setStatus("Reading file…");
-  const body = new FormData();
-  body.append("file", file);
-  body.append("page", String(state.page));
   try {
-    const response = await fetch("/api/source", { method: "POST", body });
-    if (!response.ok) throw new Error(await errorMessage(response));
-    const data = await response.json();
+    let data;
+    if (useBridge()) {
+      const file_b64 = await fileToBase64(file);
+      data = await callBridge(() =>
+        window.pywebview.api.source_preview(file_b64, file.name || "", state.page)
+      );
+    } else {
+      const body = new FormData();
+      body.append("file", file);
+      body.append("page", String(state.page));
+      const response = await fetch("/api/source", { method: "POST", body });
+      if (!response.ok) throw new Error(await errorMessage(response));
+      data = await response.json();
+    }
     setPageControls(data.page, data.pages);
     const image = new Image();
     image.onload = () => {
