@@ -37,6 +37,18 @@ The `_internal` folder next to the exe is required. Copy the whole `GK420D Stick
 
 Closing the window stops the local server.
 
+The exe embeds uvicorn on `127.0.0.1:8765`; no `run.bat` is required. On startup it clears stale listeners on that port and shows a Windows error dialog if the server cannot start.
+
+## Windows installer
+
+With Inno Setup 6 (`iscc` on PATH):
+
+```bat
+build-installer.bat
+```
+
+This runs `build.bat`, then compiles `installer\installer.iss`. The setup installs to `{autopf}\GK420D Sticker Printer`, adds a Start menu shortcut, and optional desktop icon. It does not add a Startup folder entry.
+
 ## Rebuild after code changes
 
 Run `build.bat` again. `--clean` is already on, so the previous `dist` folder is replaced.

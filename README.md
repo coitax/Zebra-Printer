@@ -26,7 +26,29 @@ Alternatives:
 - **`web.bat`** — opens the browser if the server is already running.
 - **`install-web-shortcut.bat`** — adds a Desktop shortcut to launch via `run.bat`.
 
-For a standalone `.exe` (no Python required), see [docs/BUILD.md](docs/BUILD.md) or download a release.
+### Standalone Windows app (no Python)
+
+The packaged **`.exe` is fully standalone**: double-click it and the UI opens in a desktop window. It starts a **local server on `127.0.0.1:8765` inside the same process** (you do not run `run.bat` or a separate server).
+
+Build from the repo on Windows:
+
+```bat
+build.bat
+```
+
+Output: `dist\GK420D Sticker Printer\` — copy the **whole folder** (exe plus `_internal`).
+
+Optional installer (requires [Inno Setup 6](https://jrsoftware.org/isinfo.php) on PATH):
+
+```bat
+build-installer.bat
+```
+
+Output: `dist\installer\GK420D-Sticker-Printer-Setup.exe`
+
+More detail: [docs/BUILD.md](docs/BUILD.md) or download a release.
+
+If the app says the server failed to start, **port 8765 may be busy** — close other GK420D Sticker Printer windows, dev `run.bat` sessions, or anything else listening on that port, then launch again. Logs: `%LOCALAPPDATA%\GK420D Sticker Printer\desktop.log`.
 
 ## Print a sticker
 
@@ -99,6 +121,7 @@ If the printer goes offline mid-batch, let it cool, reduce darkness, and try aga
 | Problem | What to try |
 | --- | --- |
 | Browser does not open / page won't load | Check the console window is still open. Another app may be using port **8765** — `run.bat` kills stale listeners on startup; restart `run.bat`. |
+| Standalone exe won't start / server error | Close other instances and anything on port **8765**. See `%LOCALAPPDATA%\GK420D Sticker Printer\desktop.log`. |
 | Print spans two labels or wrong length | **Calibrate media** for the size preset you selected. See section above. |
 | Print looks like a small square on a tall label | Size preset may not match stock (e.g. 4×4 preset on 4×6 paper). Select the correct size and recalibrate. |
 | Preview shows low ink fill / white bands | Switch **Fit** from Contain to **Cover**, or adjust the crop box. |
