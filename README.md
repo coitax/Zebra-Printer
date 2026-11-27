@@ -17,13 +17,13 @@ Default label size is **4" × 6"** (812 × 1218 dots), suited for shipping label
 
 1. Double-click **`run.bat`** in this folder.
 2. On first run, the script creates a virtual environment and installs dependencies (takes a minute).
-3. Your browser opens to **http://127.0.0.1:8765**.
+3. Your browser opens to **http://127.0.0.1:8765** with a one-time launch link. The server only accepts print and calibration requests from a page opened through that link; each `run.bat` start makes a new one (it is also printed in the console).
 4. Leave the console window open while you print. Closing it stops the server.
 
 Alternatives:
 
 - **`run-app.bat`** — same UI in a desktop window (Python + pywebview, **no local HTTP server**).
-- **`web.bat`** — opens the browser if the server is already running.
+- **`web.bat`** — same as `run.bat` (restarts the server and opens a fresh launch link).
 - **`install-web-shortcut.bat`** — adds a Desktop shortcut to launch via `run.bat`.
 
 ### Standalone Windows app (no Python)

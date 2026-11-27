@@ -57,6 +57,40 @@ const els = {
   pdfPageCount: document.getElementById("pdfPageCount"),
 };
 
+const TOKEN_HEADER = "X-GK420D-Token";
+const TOKEN_KEY = "gk420d.launchToken";
+
+/** Move the per-launch token from the launch URL fragment into storage and off the address bar. */
+function captureLaunchToken() {
+  const match = /(?:^#|&)token=([^&]+)/.exec(window.location.hash);
+  if (!match) return;
+  try {
+    localStorage.setItem(TOKEN_KEY, decodeURIComponent(match[1]));
+  } catch {
+    // Storage blocked: requests will be refused and the status line says why.
+  }
+  history.replaceState(null, "", window.location.pathname + window.location.search);
+}
+
+function launchToken() {
+  try {
+    return localStorage.getItem(TOKEN_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function postApi(url, body) {
+  return fetch(url, {
+    method: "POST",
+    body,
+    credentials: "same-origin",
+    headers: { [TOKEN_HEADER]: launchToken() },
+  });
+}
+
+captureLaunchToken();
+
 /** True when pywebview injected the Python js_api (desktop / frozen exe). */
 function useBridge() {
   return Boolean(window.pywebview?.api);
@@ -266,7 +300,7 @@ async function probePrinter() {
       : await (async () => {
           const body = new FormData();
           body.append("printer_name", els.printer.value);
-          const response = await fetch("/api/printers/probe", { method: "POST", body });
+          const response = await postApi("/api/printers/probe", body);
           if (!response.ok) throw new Error(await errorMessage(response));
           return response.json();
         })();
@@ -433,7 +467,7 @@ async function downloadZpl() {
       const zpl = await callBridge(() => window.pywebview.api.build_zpl(params));
       blob = new Blob([zpl], { type: "application/octet-stream" });
     } else {
-      const response = await fetch("/api/zpl", { method: "POST", body: buildForm() });
+      const response = await postApi("/api/zpl", buildForm());
       if (!response.ok) throw new Error(await errorMessage(response));
       blob = await response.blob();
     }
@@ -463,7 +497,7 @@ async function printCalibration() {
       const body = new FormData();
       appendShared(body);
       body.append("printer_name", els.printer.value);
-      const response = await fetch("/api/calibrate", { method: "POST", body });
+      const response = await postApi("/api/calibrate", body);
       if (!response.ok) throw new Error(await errorMessage(response));
     }
     setStatus("One-label test sent. The black box must stay on a single 4×4 sticker.", "ok");
@@ -486,7 +520,7 @@ async function calibrateMedia() {
       const body = new FormData();
       appendShared(body);
       body.append("printer_name", els.printer.value);
-      const response = await fetch("/api/media-calibrate", { method: "POST", body });
+      const response = await postApi("/api/media-calibrate", body);
       if (!response.ok) throw new Error(await errorMessage(response));
     }
     setStatus("Calibration sent. When it stops, press FEED once. It should advance exactly one label.", "ok");
@@ -533,7 +567,7 @@ async function postForm(url) {
     }
     throw new Error(`Unknown bridge route: ${url}`);
   }
-  const response = await fetch(url, { method: "POST", body: buildForm() });
+  const response = await postApi(url, buildForm());
   if (!response.ok) throw new Error(await errorMessage(response));
   return response.json();
 }
@@ -602,7 +636,7 @@ async function loadRenderedSource(file) {
       const body = new FormData();
       body.append("file", file);
       body.append("page", String(state.page));
-      const response = await fetch("/api/source", { method: "POST", body });
+      const response = await postApi("/api/source", body);
       if (!response.ok) throw new Error(await errorMessage(response));
       data = await response.json();
     }
