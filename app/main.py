@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import hmac
+import secrets
 from typing import Annotated
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import PlainTextResponse
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import api_service
@@ -13,9 +15,57 @@ from app.paths import resource_root
 ROOT = resource_root()
 STATIC = ROOT / "static"
 
+TOKEN_HEADER = "X-GK420D-Token"
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost"})
+SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+_LAUNCH_SECRET = secrets.token_urlsafe(32)
+
 app = FastAPI(title="GK420D Sticker Printer")
 
 APP_BUILD = api_service.APP_BUILD
+
+
+def launch_secret() -> str:
+    """Per-process secret every non-GET request must carry in the X-GK420D-Token header."""
+    return _LAUNCH_SECRET
+
+
+def _hostname(host: str) -> str:
+    if host.startswith("["):
+        return host[: host.find("]") + 1]
+    return host.rsplit(":", 1)[0] if ":" in host else host
+
+
+def _reject(status: int, message: str) -> JSONResponse:
+    return JSONResponse({"detail": message}, status_code=status)
+
+
+@app.middleware("http")
+async def require_launch_secret(request: Request, call_next):
+    # Runs before the body is read or any route touches the printer.
+    if request.method in SAFE_METHODS:
+        return await call_next(request)
+
+    host = request.headers.get("host", "")
+    if _hostname(host).lower() not in LOOPBACK_HOSTS:
+        return _reject(403, "Requests must be addressed to 127.0.0.1.")
+
+    origin = request.headers.get("origin")
+    if origin is not None and origin != f"{request.url.scheme}://{host}":
+        return _reject(403, "Cross-site request refused.")
+
+    fetch_site = request.headers.get("sec-fetch-site")
+    if fetch_site is not None and fetch_site != "same-origin":
+        return _reject(403, "Cross-site request refused.")
+
+    token = request.headers.get(TOKEN_HEADER, "")
+    if not hmac.compare_digest(token.encode("utf-8"), _LAUNCH_SECRET.encode("ascii")):
+        return _reject(
+            401,
+            "This page is not authorized for the running server. Close it and start run.bat again.",
+        )
+    return await call_next(request)
 
 
 def _http_error(exc: ApiError) -> HTTPException:

@@ -17,5 +17,4 @@ for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":8765" ^| findstr "LISTENING
   taskkill /F /PID %%a >nul 2>&1
 )
 
-start "" cmd /c "timeout /t 2 /nobreak >nul && start http://127.0.0.1:8765"
-".venv\Scripts\python.exe" -m uvicorn app.main:app --host 127.0.0.1 --port 8765
+".venv\Scripts\python.exe" -m app.serve --port 8765
